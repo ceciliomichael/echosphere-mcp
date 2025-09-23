@@ -1,0 +1,32 @@
+{
+  "name": "echosphere-mcp-server",
+  "version": "1.0.0",
+  "description": "Echosphere MCP server providing comprehensive tools for AI assistance",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "echosphere",
+    "model-context-protocol",
+    "ai-tools",
+    "file-reader"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

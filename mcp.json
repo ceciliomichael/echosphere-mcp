@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "echosphere": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\Administrator\\Desktop\\echosphere-mcp\\dist\\index.js"
+      ]
+    }
+  }
+}
