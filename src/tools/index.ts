@@ -5,13 +5,17 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerFileReaderTool } from "./file-reader.js";
+import { registerMoveFileTool } from "./move-file.js";
+import { registerRenameFileTool } from "./rename-file.js";
 
 /**
  * Registers all available tools with the MCP server
  */
 export function registerAllTools(server: McpServer): void {
-  // Register file reader tool
+  // Register file operation tools
   registerFileReaderTool(server);
+  registerMoveFileTool(server);
+  registerRenameFileTool(server);
   
   // Future tools can be registered here
   // Example:
@@ -27,6 +31,16 @@ export const availableTools = [
   {
     name: "read_files",
     description: "Read files or directories within a workspace",
+    category: "file-operations"
+  },
+  {
+    name: "move_file",
+    description: "Move a file from one location to another within a workspace",
+    category: "file-operations"
+  },
+  {
+    name: "rename_file",
+    description: "Rename a file within the same directory",
     category: "file-operations"
   }
   // Future tools will be listed here

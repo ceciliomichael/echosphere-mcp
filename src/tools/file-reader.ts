@@ -4,20 +4,19 @@
  */
 
 import { z } from "zod";
-import path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateAndNormalizePath, getPathType, validateWorkspaceRoot } from "../shared/validation.js";
-import { readSingleFile, readDirectoryFiles } from "../shared/file-operations.js";
+import { readSingleFile } from "../shared/file-operations.js";
 /**
  * Schema for the read_files tool parameters
  */
 export const readFilesSchema = {
   workspaceRoot: z.string().describe("Absolute path to the workspace root directory"),
-  relativePaths: z.array(z.string()).min(1, "Must provide at least one file path").max(50, "Maximum 50 files per batch to ensure optimal performance").describe("Array of relative file paths from the workspace root directory. For files: reads the specific file(s). For directories: reads all files in the directory and subdirectories (recursive). Use '.' to read all files in workspace root.")
+  relativePaths: z.array(z.string()).min(1, "Must provide at least one file path").max(50, "Maximum 50 files per batch to ensure optimal performance").describe("Array of relative file paths from the workspace root directory. Only individual files are supported - directories are not allowed.")
 };
 
 /**
- * Handles reading a single path (file or directory)
+ * Handles reading a single file path
  */
 async function handleSinglePath(workspace_root: string, relative_path: string): Promise<{ files: any[], errors: string[] }> {
   const errors: string[] = [];
@@ -31,40 +30,26 @@ async function handleSinglePath(workspace_root: string, relative_path: string): 
     const pathType = await getPathType(resolvedPath);
     
     if (pathType === 'not_found') {
-      errors.push(`Path "${relative_path}" not found in workspace`);
+      errors.push(`File "${relative_path}" not found in workspace`);
       return { files, errors };
     }
     
-    if (pathType === 'file') {
-      // Read single file
-      const fileResult = await readSingleFile(resolvedPath);
-      // Use the original relative_path to preserve the user's path format
-      files.push({
-        path: relative_path,
-        content: fileResult.content,
-        size: fileResult.size,
-        type: 'file'
-      });
-    } else {
-      // Read directory files
-      const dirFiles = await readDirectoryFiles(resolvedPath, workspace_root);
-      
-      if (dirFiles.length === 0) {
-        errors.push(`Directory "${relative_path}" contains no files`);
-      } else {
-        for (const file of dirFiles) {
-          files.push({
-            path: file.path,
-            content: file.content,
-            size: file.size,
-            type: 'file',
-            error: file.error
-          });
-        }
-      }
+    if (pathType === 'directory') {
+      errors.push(`Path "${relative_path}" is a directory. Only individual files are supported.`);
+      return { files, errors };
     }
+    
+    // Read single file
+    const fileResult = await readSingleFile(resolvedPath);
+    // Use the original relative_path to preserve the user's path format
+    files.push({
+      path: relative_path,
+      content: fileResult.content,
+      size: fileResult.size,
+      type: 'file'
+    });
   } catch (error) {
-    errors.push(`Error reading "${relative_path}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+    errors.push(`Error reading file "${relative_path}": ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
   
   return { files, errors };
@@ -88,7 +73,7 @@ export function registerFileReaderTool(server: McpServer): void {
           return {
             content: [{
               type: "text",
-              text: "No relative file paths provided to read.\n\nUsage: {\"workspaceRoot\": \"C:/project\", \"relativePaths\": [\"src/file1.js\", \"README.md\"]}"
+              text: "No file paths provided to read.\n\nUsage: {\"workspaceRoot\": \"C:/project\", \"relativePaths\": [\"src/file1.js\", \"README.md\"]}\n\nNote: Only individual files are supported, not directories."
             }],
             isError: true
           };
@@ -118,42 +103,22 @@ export function registerFileReaderTool(server: McpServer): void {
         // Format response
         const successCount = allFiles.length;
         const errorCount = allErrors.length;
-        const pathCount = relativePaths.length;
+        const totalCount = relativePaths.length;
         
         // Create a more descriptive summary
-        let responseText = `Processed ${pathCount} path(s), found ${successCount} file(s)`;
-        if (errorCount > 0) {
-          responseText += `, ${errorCount} error(s)`;
-        }
-        responseText += `\n\n`;
+        let responseText = `Read ${totalCount} file(s): ${successCount} successful, ${errorCount} failed\n\n`;
         
         // Add file contents
         for (let i = 0; i < relativePaths.length; i++) {
           const relativePath = relativePaths[i];
           responseText += `${relativePath}:\n`;
           
-          // Find all files that belong to this path (for directories, multiple files)
-          const pathFiles = allFiles.filter(f => f.path === relativePath || f.path.startsWith(relativePath + path.sep));
+          // Find the file with this exact path
+          const file = allFiles.find(f => f.path === relativePath);
           const errorResult = allErrors.find(e => e.includes(relativePath));
           
-          if (pathFiles.length > 0) {
-            // Check if this is a single file or directory with multiple files
-            const exactMatch = pathFiles.find(f => f.path === relativePath);
-            if (exactMatch) {
-              // Single file
-              responseText += `${exactMatch.content}\n\n`;
-            } else {
-              // Directory with multiple files
-              for (const file of pathFiles) {
-                responseText += `\n=== ${file.path} ===\n`;
-                if (file.error) {
-                  responseText += `Error: ${file.error}\n`;
-                } else {
-                  responseText += `${file.content}\n`;
-                }
-              }
-              responseText += `\n`;
-            }
+          if (file) {
+            responseText += `${file.content}\n\n`;
           } else if (errorResult) {
             responseText += `Error: ${errorResult}\n\n`;
           } else {

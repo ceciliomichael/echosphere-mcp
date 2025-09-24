@@ -31,3 +31,17 @@ export interface ToolResponse {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
 }
+
+export interface MoveFileResult {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface RenameFileResult {
+  originalRelativePath: string;
+  newRelativePath: string;
+  success: boolean;
+  error?: string;
+}
