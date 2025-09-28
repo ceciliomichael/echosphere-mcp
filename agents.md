@@ -8,6 +8,7 @@
 
 <thinking description="This block is for the agent to think step by step always utilize this block">
 You as the agent should always think step by step and follow the development rules and acknowledge any prohibited tools.
+Inside this thinking block, you should also retrieve important memory context that is relevant to the task at hand. and get_time tool to get the current time.
 </thinking>
 
 <prohibited_tools description="The user is prohibiting the agent from using certain tools">

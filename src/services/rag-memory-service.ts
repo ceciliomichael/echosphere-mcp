@@ -365,7 +365,7 @@ export class RAGMemoryService {
   }
 
   /**
-   * Load memory with optional RAG query
+   * Load memory with optional RAG query - Always provides meaningful responses
    */
   async loadMemory(
     workspaceRoot: string,
@@ -405,58 +405,109 @@ export class RAGMemoryService {
       console.error(`Searching memory with query: "${query}"`);
       const queryEmbedding = await aiService.generateEmbedding(query);
       
-      // Find similar chunks with expanded search
+      // Find similar chunks with very low threshold to always get results
       const allSimilarChunks = findSimilarEmbeddings(
         queryEmbedding,
         store.chunks.map(chunk => ({ embedding: chunk.embedding, content: chunk })),
-        Math.min(maxResults * 3, 15), // Get more candidates for filtering
-        0.1 // Lower threshold for initial retrieval
+        Math.min(maxResults * 4, 20), // Get more candidates for better selection
+        0.05 // Very low threshold to capture any potential connections
       );
       
+      // If still no results, fall back to recent memory
       if (allSimilarChunks.length === 0) {
+        const fallbackChunks = store.chunks
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, Math.min(maxResults, store.chunks.length));
+        
+        const fallbackContent = fallbackChunks.map(chunk => chunk.content).join('\n\n---\n\n');
+        
+        if (useRAG && fallbackChunks.length > 0) {
+          try {
+            const systemPrompt = `You are an AI assistant with access to memory context. The user asked: "${query}"
+
+While no directly relevant memory was found, here is the most recent context available. Try to find any possible connections or provide helpful context based on what's available, even if indirect.
+
+INSTRUCTIONS:
+1. Look for any potential connections to the user's query, even indirect ones
+2. If no connections exist, explain what information IS available in memory
+3. Be helpful by suggesting what might be related or useful from the available context
+4. Always acknowledge that this is the best available context, not a direct match
+
+Available Memory Context:
+${fallbackContent}
+
+User Query: ${query}`;
+            
+            const generatedResponse = await aiService.queryLLM(query, systemPrompt);
+            return {
+              success: true,
+              content: generatedResponse,
+              size: generatedResponse.length,
+              relevantChunks: fallbackChunks,
+              generatedResponse
+            };
+          } catch (error) {
+            console.error("Error generating fallback RAG response:", error);
+          }
+        }
+        
         return {
           success: true,
-          content: `No relevant memory found for query: "${query}". Try a different search term or check if relevant information has been saved to memory.`,
-          size: 0
+          content: `No directly relevant memory found for: "${query}". However, here is the most recent available context that might contain related information:\n\n${fallbackContent}`,
+          size: fallbackContent.length,
+          relevantChunks: fallbackChunks
         };
       }
       
-      // Calculate dynamic threshold and filter
+      // Separate results into different relevance tiers
       const scores = allSimilarChunks.map(chunk => chunk.score);
-      const dynamicThreshold = this.calculateDynamicThreshold(scores, minScore);
+      const maxScore = Math.max(...scores);
       
-      const filteredByScore = allSimilarChunks.filter(chunk => chunk.score >= dynamicThreshold);
+      // Define flexible relevance tiers
+      const highlyRelevant = allSimilarChunks.filter(chunk => chunk.score >= Math.max(minScore, maxScore * 0.7));
+      const moderatelyRelevant = allSimilarChunks.filter(chunk => 
+        chunk.score >= Math.max(0.15, maxScore * 0.4) && chunk.score < Math.max(minScore, maxScore * 0.7)
+      );
+      const somewhatRelevant = allSimilarChunks.filter(chunk => 
+        chunk.score >= 0.05 && chunk.score < Math.max(0.15, maxScore * 0.4)
+      );
       
-      if (filteredByScore.length === 0) {
-        return {
-          success: true,
-          content: `No highly relevant memory found for query: "${query}" (highest similarity: ${scores[0]?.toFixed(3) || 'N/A'}). Try a broader search term.`,
-          size: 0
-        };
+      // Always provide results, starting with most relevant
+      let selectedChunks: Array<{ content: MemoryChunk; score: number }> = [];
+      let relevanceLevel = "highly relevant";
+      
+      if (highlyRelevant.length > 0) {
+        selectedChunks = this.applySemanticFirewall(highlyRelevant).slice(0, maxResults);
+        relevanceLevel = "highly relevant";
+      } else if (moderatelyRelevant.length > 0) {
+        selectedChunks = this.applySemanticFirewall(moderatelyRelevant).slice(0, maxResults);
+        relevanceLevel = "moderately relevant";
+      } else {
+        selectedChunks = this.applySemanticFirewall(somewhatRelevant).slice(0, maxResults);
+        relevanceLevel = "potentially related";
       }
       
-      // Apply semantic firewall to prevent conflicting evidence
-      const firewallFiltered = this.applySemanticFirewall(filteredByScore);
-      
-      // Take final results
-      const finalChunks = firewallFiltered.slice(0, maxResults);
-      const relevantChunks = finalChunks.map(result => result.content);
+      const relevantChunks = selectedChunks.map(result => result.content);
       const contextContent = relevantChunks.map(chunk => chunk.content).join('\n\n---\n\n');
       
       let response = contextContent;
       let generatedResponse: string | undefined;
       
-      // Use RAG to generate a response if requested
+      // Use RAG to generate a response with relevance awareness
       if (useRAG && relevantChunks.length > 0) {
         try {
-          const systemPrompt = `You are an AI assistant with access to memory context from previous conversations and sessions. Your task is to answer the user's query using ONLY the provided memory context.
+          const systemPrompt = `You are an AI assistant with access to memory context from previous conversations and sessions. 
 
-IMPORTANT RULES:
-1. Answer strictly from the memory context provided below
-2. If the memory context doesn't contain sufficient information, say "Not found in memory" or "Insufficient memory context"
-3. Be concise but comprehensive in your response
-4. Focus on helping the user understand what happened in previous sessions
-5. Do not add external knowledge or make assumptions beyond the memory context
+The user asked: "${query}"
+
+The following memory context was found with ${relevanceLevel} similarity (similarity score: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):
+
+INSTRUCTIONS:
+1. If the context is highly relevant, answer directly from the memory
+2. If the context is moderately relevant, explain the connection and provide what information is available
+3. If the context is potentially related, acknowledge the indirect connection and explain what related information exists
+4. Always be helpful and find meaningful connections where possible
+5. Don't claim information that isn't in the context, but do explain relationships and connections
 
 Memory Context:
 ${contextContent}
@@ -467,8 +518,8 @@ User Query: ${query}`;
           response = generatedResponse;
         } catch (error) {
           console.error("Error generating RAG response:", error);
-          // Fall back to context content if RAG fails
-          response = `Memory context found (${relevantChunks.length} chunks):\n\n${contextContent}`;
+          // Fall back to context content with relevance indication
+          response = `Found ${relevanceLevel} memory context (${relevantChunks.length} chunks, similarity: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):\n\n${contextContent}`;
         }
       }
       
