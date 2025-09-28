@@ -7,6 +7,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerFileReaderTool } from "./file-reader.js";
 import { registerMoveFileTool } from "./move-file.js";
 import { registerRenameFileTool } from "./rename-file.js";
+import { registerLoadMemoryTool } from "./load-memory.js";
+import { registerSaveMemoryTool } from "./save-memory.js";
 
 /**
  * Registers all available tools with the MCP server
@@ -16,6 +18,10 @@ export function registerAllTools(server: McpServer): void {
   registerFileReaderTool(server);
   registerMoveFileTool(server);
   registerRenameFileTool(server);
+  
+  // Register memory management tools
+  registerLoadMemoryTool(server);
+  registerSaveMemoryTool(server);
   
   // Future tools can be registered here
   // Example:
@@ -42,6 +48,16 @@ export const availableTools = [
     name: "rename_file",
     description: "Rename a file within the same directory",
     category: "file-operations"
+  },
+  {
+    name: "load_memory",
+    description: "Load memory from .memory/memory.json with optional query functionality",
+    category: "memory-management"
+  },
+  {
+    name: "save_memory",
+    description: "Save memory to .memory/memory.json with optional append functionality and embeddings",
+    category: "memory-management"
   }
   // Future tools will be listed here
 ] as const;

@@ -7,9 +7,19 @@ A comprehensive Model Context Protocol (MCP) server providing various tools for 
 ### File Operations
 - **Single File Reading**: Read individual files by specifying their relative path
 - **Directory Reading**: Read all files in a directory (non-recursive)
+- **File Moving**: Move files from one location to another within the workspace
+- **File Renaming**: Rename files within the same directory
 - **Security**: Built-in protection against directory traversal attacks
 - **Validation**: Input validation for workspace roots and file paths
 - **Error Handling**: Comprehensive error handling with clear error messages
+
+### Memory Management (RAG System)
+- **RAG-Powered Memory**: Advanced Retrieval Augmented Generation with semantic search using embeddings
+- **Load Memory**: Query memory using natural language with vector similarity search
+- **Save Memory**: Save memory with automatic embedding generation and intelligent chunking
+- **Semantic Search**: Find relevant information using AI embeddings instead of simple text matching
+- **Smart Chunking**: Automatically splits large content into optimal chunks with overlap
+- **LLM Integration**: Uses configured AI models for embeddings and response generation
 
 ### Architecture
 - **Modular Design**: Tools are organized in separate modules for easy maintenance
@@ -126,7 +136,169 @@ The tool provides clear error messages for common issues:
 - Path traversal attempts
 - File reading errors
 
+### Tool: `move_file`
+
+Moves a file from one location to another within the workspace.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workspaceRoot` | string | Yes | Absolute path to the workspace root directory |
+| `sourceRelativePath` | string | Yes | Relative path of the source file to move |
+| `targetRelativePath` | string | Yes | Relative path where the file should be moved to (including new filename) |
+
+#### Example
+
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "sourceRelativePath": "src/old-file.js",
+  "targetRelativePath": "src/components/new-file.js"
+}
+```
+
+### Tool: `rename_file`
+
+Renames a file within the same directory.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workspaceRoot` | string | Yes | Absolute path to the workspace root directory |
+| `relativePath` | string | Yes | Relative path of the file to rename |
+| `newName` | string | Yes | New name for the file (filename only, not a path) |
+
+#### Example
+
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "relativePath": "src/component.js",
+  "newName": "new-component.js"
+}
+```
+
+### Tool: `load_memory`
+
+Loads memory using RAG (Retrieval Augmented Generation) with semantic search capabilities.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workspaceRoot` | string | Yes | Absolute path to the workspace root directory |
+| `query` | string | No | Natural language query to search within memory using semantic similarity |
+| `maxResults` | number | No | Maximum number of similar memory chunks to return (default: 5) |
+| `useRAG` | boolean | No | Whether to use RAG to generate a response (default: true) |
+
+#### Examples
+
+**Load all memory:**
+```json
+{
+  "workspaceRoot": "/home/user/my-project"
+}
+```
+
+**Semantic query with RAG:**
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "query": "How do I configure the database connection?",
+  "maxResults": 3,
+  "useRAG": true
+}
+```
+
+**Semantic search without RAG generation:**
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "query": "API endpoints",
+  "useRAG": false
+}
+```
+
+#### Features
+
+- **Semantic Search**: Uses AI embeddings to find contextually relevant memory chunks
+- **RAG Response**: Generates clean, intelligent responses using retrieved memory context
+- **Vector Similarity**: Finds similar content even if exact keywords don't match
+- **Configurable Results**: Control how many similar chunks to retrieve
+- **Clean Output**: Automatically removes markdown formatting from AI responses
+- **Auto-creation**: Memory system is automatically initialized if it doesn't exist
+
+### Tool: `save_memory`
+
+Saves memory with automatic embedding generation and intelligent chunking.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workspaceRoot` | string | Yes | Absolute path to the workspace root directory |
+| `content` | string | Yes | Memory content to save (automatically chunked and embedded) |
+| `append` | boolean | No | Whether to append to existing memory or replace it (default: false) |
+| `metadata` | object | No | Optional metadata to associate with the memory |
+| `tags` | string[] | No | Optional tags to categorize the memory |
+
+#### Examples
+
+**Save new memory with embeddings:**
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "content": "The database connection uses PostgreSQL on port 5432. The connection string format is postgresql://user:pass@localhost:5432/dbname. Always use connection pooling for better performance.",
+  "metadata": {"source": "documentation", "type": "configuration"},
+  "tags": ["database", "postgresql", "configuration"]
+}
+```
+
+**Append to existing memory:**
+```json
+{
+  "workspaceRoot": "/home/user/my-project",
+  "content": "API rate limiting is set to 1000 requests per hour per user. Use exponential backoff for retries.",
+  "append": true,
+  "tags": ["api", "rate-limiting"]
+}
+```
+
+#### Features
+
+- **Automatic Embeddings**: Generates vector embeddings for semantic search
+- **Smart Chunking**: Splits large content into optimal chunks with sentence boundaries
+- **Chunk Overlap**: Maintains context between chunks with intelligent overlap
+- **Metadata Support**: Store additional structured information with memory
+- **Tagging System**: Categorize memory for better organization
+- **Statistics**: Returns detailed information about memory storage
+
 ## Configuration
+
+### Environment Variables
+
+Create a `.env` file in your project root with the following configuration:
+
+```env
+# AI Configuration
+AI_BASE_URL=https://ai.echosphere.cfd/v1
+AI_API_KEY=your-api-key-here
+AI_MODEL=mistral-small-latest
+AI_EMBEDDING_MODEL=mistral-embed
+
+# Search API (optional)
+SEARXNG_URL=https://search.echosphere.cfd
+```
+
+#### Environment Variable Details
+
+- **AI_BASE_URL**: Base URL for the AI API endpoint
+- **AI_API_KEY**: Your API key for the AI service
+- **AI_MODEL**: The LLM model to use for RAG response generation
+- **AI_EMBEDDING_MODEL**: The embedding model to use for semantic search
+- **SEARXNG_URL**: Optional search API endpoint
 
 ### Claude Desktop Configuration
 
@@ -161,7 +333,11 @@ echosphere-mcp-server/
 │   ├── index.ts          # Main server entry point
 │   ├── tools/            # Tool implementations
 │   │   ├── index.ts      # Tool registry
-│   │   └── file-reader.ts # File reading tool
+│   │   ├── file-reader.ts # File reading tool
+│   │   ├── move-file.ts  # File moving tool
+│   │   ├── rename-file.ts # File renaming tool
+│   │   ├── load-memory.ts # Memory loading tool with RAG
+│   │   └── save-memory.ts # Memory saving tool with embeddings
 │   └── shared/           # Shared utilities
 │       ├── types.ts      # Common type definitions
 │       ├── validation.ts # Input validation utilities

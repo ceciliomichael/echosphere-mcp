@@ -45,3 +45,39 @@ export interface RenameFileResult {
   success: boolean;
   error?: string;
 }
+
+export interface MemoryResult {
+  success: boolean;
+  content?: string;
+  size?: number;
+  error?: string;
+  relevantChunks?: MemoryChunk[];
+  generatedResponse?: string;
+}
+
+export interface MemoryChunk {
+  id: string;
+  content: string;
+  embedding: number[];
+  timestamp: string;
+  metadata?: Record<string, any>;
+  tags?: string[];
+  docId?: string;
+  source?: string;
+  contentHash: string;
+  chunkIndex: number;
+  chunkCount: number;
+  embeddingModel: string;
+}
+
+export interface MemoryStore {
+  chunks: MemoryChunk[];
+  version: string;
+  lastUpdated: string;
+  totalChunks: number;
+}
+
+export interface SimilarityResult {
+  chunk: MemoryChunk;
+  score: number;
+}
