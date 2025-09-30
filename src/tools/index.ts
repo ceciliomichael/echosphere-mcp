@@ -9,7 +9,7 @@ import { registerMoveFileTool } from "./move-file.js";
 import { registerRenameFileTool } from "./rename-file.js";
 import { registerLoadMemoryTool } from "./load-memory.js";
 import { registerSaveMemoryTool } from "./save-memory.js";
-import { registerGetTimeTool } from "./get-time.js";
+import { registerCheckStructureTool } from "./check-structure.js";
 
 /**
  * Registers all available tools with the MCP server
@@ -19,14 +19,14 @@ export function registerAllTools(server: McpServer): void {
   registerFileReaderTool(server);
   registerMoveFileTool(server);
   registerRenameFileTool(server);
-  
+
   // Register memory management tools
   registerLoadMemoryTool(server);
   registerSaveMemoryTool(server);
-  
-  // Register utility tools
-  registerGetTimeTool(server);
-  
+
+  // Register structure checking tool
+  registerCheckStructureTool(server);
+
   // Future tools can be registered here
   // Example:
   // registerSearchTool(server);
@@ -64,9 +64,9 @@ export const availableTools = [
     category: "memory-management"
   },
   {
-    name: "get_time",
-    description: "Get current local time in 12-hour format with AM/PM",
-    category: "utilities"
+    name: "check_structure",
+    description: "Display workspace directory structure in tree format with gitignore support",
+    category: "file-operations"
   }
   // Future tools will be listed here
 ] as const;
