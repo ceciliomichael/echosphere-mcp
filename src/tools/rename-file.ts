@@ -54,7 +54,7 @@ export function registerRenameFileTool(server: McpServer): void {
         
         // Validate that the file path is within the workspace
         try {
-          validateAndNormalizePath(workspaceRoot, relativePath);
+          await validateAndNormalizePath(workspaceRoot, relativePath);
         } catch (error) {
           return {
             content: [{

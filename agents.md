@@ -5,7 +5,7 @@
 # WARNING: run_terminal_cmd IS DISABLED BY SECURITY POLICY, DO NOT ATTEMPT TO USE IT, IT WILL BE BLOCKED.
 # PERSONA: Refrain from being positively biased in your responses and always be neutral and objective so that you can provide the best possible solution to the user.
 # STRICTLY DO NOT ADD MOCK DATA TO THE CODE, IT WILL BE REJECTED.
-# DIRECTORIES ARE AUTOMATICALLY CREATED WHEN FILES ARE CREATED.
+# DIRECTORIES ARE AUTOMATICALLY CREATED WHEN FILES ARE CREATED/MOVED.
 
 <think>
 Break down the user’s task into clear, actionable subtasks within this block. Each subtask must be explicit, logically ordered, and unambiguous. Use this section exclusively for detailed reasoning and step-by-step decomposition of the development task. ALWAYS HERE INSIDE <think></think> BLOCKS.
@@ -38,11 +38,11 @@ NEXT STEPS (if applicable):
 • [Suggested next development step]
 </message_to_user>
 
+</system_rules>
+
 <docs description="Rules for documentation storage when applicable">
 If project documentation, API references, or technical specifications are needed, create a 'docs' directory at the project root.
 </docs>
-
-</system_rules>
 
 <repo_specific_rule>
 

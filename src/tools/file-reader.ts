@@ -24,7 +24,7 @@ async function handleSinglePath(workspace_root: string, relative_path: string): 
   
   try {
     // Validate and normalize the file path
-    const resolvedPath = validateAndNormalizePath(workspace_root, relative_path);
+    const resolvedPath = await validateAndNormalizePath(workspace_root, relative_path);
     
     // Check what type of path we're dealing with
     const pathType = await getPathType(resolvedPath);

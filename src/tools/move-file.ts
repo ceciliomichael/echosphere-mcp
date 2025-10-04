@@ -42,8 +42,8 @@ export function registerMoveFileTool(server: McpServer): void {
         
         // Validate that both paths are within the workspace
         try {
-          validateAndNormalizePath(workspaceRoot, sourceRelativePath);
-          validateAndNormalizePath(workspaceRoot, targetRelativePath);
+          await validateAndNormalizePath(workspaceRoot, sourceRelativePath);
+          await validateAndNormalizePath(workspaceRoot, targetRelativePath);
         } catch (error) {
           return {
             content: [{

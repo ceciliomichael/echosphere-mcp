@@ -85,12 +85,14 @@ export async function moveFile(
   sourceRelativePath: string,
   targetRelativePath: string
 ): Promise<MoveFileResult> {
+  const sourcePath = path.resolve(workspaceRoot, sourceRelativePath);
+  const targetPath = path.resolve(workspaceRoot, targetRelativePath);
+  
+  // Store source stats for verification later
+  let sourceStats;
   try {
-    const sourcePath = path.resolve(workspaceRoot, sourceRelativePath);
-    const targetPath = path.resolve(workspaceRoot, targetRelativePath);
-    
     // Ensure source file exists
-    const sourceStats = await fs.stat(sourcePath);
+    sourceStats = await fs.stat(sourcePath);
     if (!sourceStats.isFile()) {
       return {
         sourceRelativePath,
@@ -99,40 +101,103 @@ export async function moveFile(
         error: `Source "${sourceRelativePath}" is not a file`
       };
     }
-    
-    // Create target directory if it doesn't exist
-    const targetDir = path.dirname(targetPath);
-    await fs.mkdir(targetDir, { recursive: true });
-    
-    // Check if target already exists
-    try {
-      await fs.stat(targetPath);
-      return {
-        sourceRelativePath,
-        targetRelativePath,
-        success: false,
-        error: `Target file "${targetRelativePath}" already exists`
-      };
-    } catch {
-      // Target doesn't exist, which is what we want
-    }
-    
-    // Move the file
-    await fs.rename(sourcePath, targetPath);
-    
-    return {
-      sourceRelativePath,
-      targetRelativePath,
-      success: true
-    };
   } catch (error) {
     return {
       sourceRelativePath,
       targetRelativePath,
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: `Source file "${sourceRelativePath}" does not exist or cannot be accessed`
     };
   }
+  
+  // Check if target already exists
+  try {
+    await fs.stat(targetPath);
+    return {
+      sourceRelativePath,
+      targetRelativePath,
+      success: false,
+      error: `Target file "${targetRelativePath}" already exists`
+    };
+  } catch {
+    // Target doesn't exist, which is what we want
+  }
+  
+  // Create target directory if it doesn't exist
+  const targetDir = path.dirname(targetPath);
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+  } catch (error) {
+    return {
+      sourceRelativePath,
+      targetRelativePath,
+      success: false,
+      error: `Failed to create target directory: ${error instanceof Error ? error.message : 'Unknown error'}`
+    };
+  }
+  
+  // Move the file using rename (atomic operation on same filesystem)
+  // If rename fails (e.g., cross-device), fall back to copy + delete
+  try {
+    await fs.rename(sourcePath, targetPath);
+  } catch (renameError) {
+    // Rename failed, try copy + delete as fallback
+    try {
+      await fs.copyFile(sourcePath, targetPath);
+      
+      // Verify the copy was successful before deleting the original
+      try {
+        const targetStats = await fs.stat(targetPath);
+        if (targetStats.size !== sourceStats.size) {
+          // Copy verification failed, clean up and return error
+          await fs.unlink(targetPath).catch(() => {}); // Best effort cleanup
+          return {
+            sourceRelativePath,
+            targetRelativePath,
+            success: false,
+            error: 'File copy verification failed - size mismatch'
+          };
+        }
+      } catch (verifyError) {
+        return {
+          sourceRelativePath,
+          targetRelativePath,
+          success: false,
+          error: `Failed to verify copied file: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`
+        };
+      }
+      
+      // Copy successful and verified, now delete the original
+      await fs.unlink(sourcePath);
+    } catch (copyError) {
+      return {
+        sourceRelativePath,
+        targetRelativePath,
+        success: false,
+        error: `Failed to move file: ${copyError instanceof Error ? copyError.message : 'Unknown error'}`
+      };
+    }
+  }
+  
+  // Verify source file was removed
+  try {
+    await fs.stat(sourcePath);
+    // If we reach here, the source file still exists - this shouldn't happen
+    return {
+      sourceRelativePath,
+      targetRelativePath,
+      success: false,
+      error: 'Move operation failed - source file still exists after move'
+    };
+  } catch {
+    // Source file doesn't exist anymore, which is correct
+  }
+  
+  return {
+    sourceRelativePath,
+    targetRelativePath,
+    success: true
+  };
 }
 
 /**
