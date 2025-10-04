@@ -1,212 +1,24 @@
 /**
  * RAG Memory Service for Echosphere MCP Server
  * Provides vector-based memory storage and retrieval with embeddings
+ * 
+ * This is a thin facade that orchestrates:
+ * - TextChunker: intelligent text splitting
+ * - Deduplicator: content hash and similarity-based deduplication
+ * - MemoryStoreService: persistence and I/O
+ * - RetrievalService: similarity search and filtering
  */
 
-import { promises as fs } from "fs";
-import path from "path";
 import { randomUUID } from "crypto";
-import { createHash } from "crypto";
-import { aiService, findSimilarEmbeddings, cosineSimilarity } from "./ai-service.js";
-import type { MemoryChunk, MemoryStore, MemoryResult, SimilarityResult } from "../shared/types.js";
-import { CHUNK_SIZE, CHUNK_OVERLAP, SIMILARITY_DEDUP_THRESHOLD } from "../constants/rag-config.js";
+import { aiService } from "./ai-service.js";
+import { textChunker } from "./chunker.js";
+import { deduplicator } from "./deduplicator.js";
+import { memoryStoreService } from "./memory-store.js";
+import { retrievalService } from "./retrieval.js";
+import type { MemoryChunk, MemoryResult } from "../shared/types.js";
 import { logError, logInfo } from "../utils/logger.js";
 
 export class RAGMemoryService {
-  private readonly MEMORY_DIR = ".memory";
-  private readonly MEMORY_FILE = "memory.json";
-  private readonly CHUNK_SIZE = CHUNK_SIZE;
-  private readonly CHUNK_OVERLAP = CHUNK_OVERLAP;
-  private readonly SIMILARITY_DEDUP_THRESHOLD = SIMILARITY_DEDUP_THRESHOLD;
-
-  /**
-   * Generate content hash for deduplication
-   */
-  private generateContentHash(content: string): string {
-    // Normalize content: trim, collapse whitespace, remove volatile elements
-    const normalized = content
-      .trim()
-      .replace(/\s+/g, ' ')
-      .toLowerCase();
-    
-    return createHash('sha256').update(normalized).digest('hex').substring(0, 16);
-  }
-
-  /**
-   * Check if chunk is duplicate based on content hash or similarity
-   */
-  private isDuplicate(newChunk: { content: string; contentHash: string; embedding?: number[] }, existingChunks: MemoryChunk[], docId?: string): boolean {
-    for (const existing of existingChunks) {
-      // Skip if different docId (allow duplicates across different documents)
-      if (docId && existing.docId && docId !== existing.docId) {
-        continue;
-      }
-      
-      // Check content hash first (exact duplicates)
-      if (existing.contentHash === newChunk.contentHash) {
-        return true;
-      }
-      
-      // Check semantic similarity for near-duplicates
-      if (newChunk.embedding && existing.embedding) {
-        const similarity = cosineSimilarity(newChunk.embedding, existing.embedding);
-        if (similarity >= this.SIMILARITY_DEDUP_THRESHOLD) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
-  }
-
-  /**
-   * Load memory store from disk
-   */
-  private async loadMemoryStore(workspaceRoot: string): Promise<MemoryStore> {
-    const memoryPath = path.resolve(workspaceRoot, this.MEMORY_DIR, this.MEMORY_FILE);
-    
-    try {
-      const data = await fs.readFile(memoryPath, 'utf-8');
-      const store = JSON.parse(data) as MemoryStore;
-      
-      // Validate store structure
-      if (!store.chunks || !Array.isArray(store.chunks)) {
-        throw new Error("Invalid memory store format");
-      }
-      
-      return store;
-    } catch (error) {
-      // Return empty store if file doesn't exist or is invalid
-      return {
-        chunks: [],
-        version: "1.0.0",
-        lastUpdated: new Date().toISOString(),
-        totalChunks: 0
-      };
-    }
-  }
-
-  /**
-   * Save memory store to disk
-   */
-  private async saveMemoryStore(workspaceRoot: string, store: MemoryStore): Promise<void> {
-    const memoryDir = path.resolve(workspaceRoot, this.MEMORY_DIR);
-    const memoryPath = path.join(memoryDir, this.MEMORY_FILE);
-    
-    // Ensure memory directory exists
-    await fs.mkdir(memoryDir, { recursive: true });
-    
-    // Update metadata
-    store.lastUpdated = new Date().toISOString();
-    store.totalChunks = store.chunks.length;
-    
-    // Save to disk
-    await fs.writeFile(memoryPath, JSON.stringify(store, null, 2), 'utf-8');
-  }
-
-  /**
-   * Split text into chunks with intelligent boundary detection
-   */
-  private splitIntoChunks(text: string): string[] {
-    const chunks: string[] = [];
-    
-    // First try to split by paragraphs (double newlines)
-    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-    
-    let currentChunk = "";
-    
-    for (const paragraph of paragraphs) {
-      const paragraphTrimmed = paragraph.trim();
-      
-      // If adding this paragraph would exceed chunk size
-      if (currentChunk.length + paragraphTrimmed.length + 2 > this.CHUNK_SIZE && currentChunk.length > 0) {
-        chunks.push(currentChunk.trim());
-        
-        // Start new chunk with overlap from previous chunk
-        const overlapText = this.getOverlapText(currentChunk);
-        currentChunk = overlapText + (overlapText ? "\n\n" : "") + paragraphTrimmed;
-      } else {
-        currentChunk += (currentChunk ? "\n\n" : "") + paragraphTrimmed;
-      }
-      
-      // If current paragraph itself is too large, split it by sentences
-      if (currentChunk.length > this.CHUNK_SIZE) {
-        const splitChunks = this.splitLargeParagraph(currentChunk);
-        chunks.push(...splitChunks.slice(0, -1)); // Add all but the last chunk
-        currentChunk = splitChunks[splitChunks.length - 1] || ""; // Keep the last chunk as current
-      }
-    }
-    
-    if (currentChunk.trim().length > 0) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    // Fallback: if no paragraphs found, split by character count
-    if (chunks.length === 0 && text.length > 0) {
-      for (let i = 0; i < text.length; i += this.CHUNK_SIZE - this.CHUNK_OVERLAP) {
-        const end = Math.min(i + this.CHUNK_SIZE, text.length);
-        const chunk = text.slice(i, end);
-        chunks.push(chunk);
-      }
-    }
-    
-    return chunks.filter(chunk => chunk.trim().length > 0);
-  }
-
-  /**
-   * Get overlap text from the end of a chunk
-   */
-  private getOverlapText(chunk: string): string {
-    if (chunk.length <= this.CHUNK_OVERLAP) {
-      return chunk;
-    }
-    
-    const overlapCandidate = chunk.slice(-this.CHUNK_OVERLAP);
-    
-    // Try to find a good boundary (sentence or line break)
-    const sentenceMatch = overlapCandidate.match(/[.!?]\s+(.*)$/);
-    if (sentenceMatch && sentenceMatch[1].length > 20) {
-      return sentenceMatch[1];
-    }
-    
-    const lineMatch = overlapCandidate.match(/\n(.*)$/);
-    if (lineMatch && lineMatch[1].length > 20) {
-      return lineMatch[1];
-    }
-    
-    // Fallback to word boundary
-    const words = overlapCandidate.split(' ');
-    const wordOverlap = words.slice(Math.max(0, words.length - 15)).join(' ');
-    return wordOverlap;
-  }
-
-  /**
-   * Split a large paragraph by sentences
-   */
-  private splitLargeParagraph(paragraph: string): string[] {
-    const chunks: string[] = [];
-    const sentences = paragraph.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
-    
-    let currentChunk = "";
-    
-    for (const sentence of sentences) {
-      if (currentChunk.length + sentence.length + 1 > this.CHUNK_SIZE && currentChunk.length > 0) {
-        chunks.push(currentChunk.trim());
-        
-        const overlapText = this.getOverlapText(currentChunk);
-        currentChunk = overlapText + (overlapText ? " " : "") + sentence;
-      } else {
-        currentChunk += (currentChunk ? " " : "") + sentence;
-      }
-    }
-    
-    if (currentChunk.trim().length > 0) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    return chunks;
-  }
-
   /**
    * Save memory with embeddings
    */
@@ -220,7 +32,7 @@ export class RAGMemoryService {
     source?: string
   ): Promise<MemoryResult> {
     try {
-      const store = await this.loadMemoryStore(workspaceRoot);
+      const store = await memoryStoreService.loadMemoryStore(workspaceRoot);
       
       // If not appending and docId is provided, remove existing chunks for this docId
       if (!append && docId) {
@@ -231,7 +43,7 @@ export class RAGMemoryService {
       }
       
       // Split content into chunks
-      const textChunks = this.splitIntoChunks(content);
+      const textChunks = textChunker.splitIntoChunks(content);
       
       if (textChunks.length === 0) {
         return {
@@ -254,7 +66,7 @@ export class RAGMemoryService {
       for (let index = 0; index < textChunks.length; index++) {
         const chunk = textChunks[index];
         const embedding = embeddings[index];
-        const contentHash = this.generateContentHash(chunk);
+        const contentHash = deduplicator.generateContentHash(chunk);
         
         const candidateChunk = {
           content: chunk,
@@ -263,7 +75,7 @@ export class RAGMemoryService {
         };
         
         // Check for duplicates
-        if (this.isDuplicate(candidateChunk, store.chunks, docId)) {
+        if (deduplicator.isDuplicate(candidateChunk, store.chunks, docId)) {
           duplicatesSkipped++;
           continue;
         }
@@ -290,7 +102,7 @@ export class RAGMemoryService {
       store.chunks.push(...newChunks);
       
       // Save to disk
-      await this.saveMemoryStore(workspaceRoot, store);
+      await memoryStoreService.saveMemoryStore(workspaceRoot, store);
       
       let resultMessage = `Successfully saved ${newChunks.length} memory chunks`;
       if (duplicatesSkipped > 0) {
@@ -312,61 +124,6 @@ export class RAGMemoryService {
   }
 
   /**
-   * Apply semantic firewall to prevent conflicting evidence
-   */
-  private applySemanticFirewall(chunks: Array<{ content: MemoryChunk; score: number }>): Array<{ content: MemoryChunk; score: number }> {
-    if (chunks.length === 0) return chunks;
-    
-    // Group chunks by docId
-    const chunksByDocId = new Map<string, Array<{ content: MemoryChunk; score: number }>>();
-    const orphanChunks: Array<{ content: MemoryChunk; score: number }> = [];
-    
-    for (const chunk of chunks) {
-      if (chunk.content.docId) {
-        if (!chunksByDocId.has(chunk.content.docId)) {
-          chunksByDocId.set(chunk.content.docId, []);
-        }
-        chunksByDocId.get(chunk.content.docId)!.push(chunk);
-      } else {
-        orphanChunks.push(chunk);
-      }
-    }
-    
-    const filteredChunks: Array<{ content: MemoryChunk; score: number }> = [];
-    
-    // For each docId, keep only the highest scoring chunks (single version)
-    for (const [docId, docChunks] of chunksByDocId) {
-      // Sort by score descending
-      docChunks.sort((a, b) => b.score - a.score);
-      
-      // Take the best chunks from this document
-      const bestFromDoc = docChunks.slice(0, Math.min(3, docChunks.length));
-      filteredChunks.push(...bestFromDoc);
-    }
-    
-    // Add orphan chunks (no docId)
-    filteredChunks.push(...orphanChunks);
-    
-    // Sort final result by score
-    return filteredChunks.sort((a, b) => b.score - a.score);
-  }
-
-  /**
-   * Calculate dynamic similarity threshold
-   */
-  private calculateDynamicThreshold(scores: number[], minScore: number): number {
-    if (scores.length === 0) return minScore;
-    
-    const topScore = scores[0];
-    
-    // Use dynamic threshold: minimum of provided minScore or 80% of top score
-    const dynamicThreshold = Math.max(minScore, topScore * 0.8);
-    
-    // But don't go below 0.2 (too permissive) or above 0.7 (too restrictive)
-    return Math.max(0.2, Math.min(0.7, dynamicThreshold));
-  }
-
-  /**
    * Load memory with optional RAG query - Always provides meaningful responses
    */
   async loadMemory(
@@ -377,7 +134,7 @@ export class RAGMemoryService {
     minScore: number = 0.3
   ): Promise<MemoryResult> {
     try {
-      const store = await this.loadMemoryStore(workspaceRoot);
+      const store = await memoryStoreService.loadMemoryStore(workspaceRoot);
       
       if (store.chunks.length === 0) {
         return {
@@ -389,12 +146,9 @@ export class RAGMemoryService {
       
       // If no query, return a summary of recent memory
       if (!query) {
-        // Sort by timestamp (most recent first) and take top chunks
-        const recentChunks = store.chunks
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, Math.min(10, store.chunks.length));
-        
+        const recentChunks = this.getRecentChunks(store.chunks, maxResults);
         const totalContent = recentChunks.map(chunk => chunk.content).join('\n\n---\n\n');
+        
         return {
           success: true,
           content: `Recent memory context (${recentChunks.length} chunks):\n\n${totalContent}`,
@@ -408,24 +162,84 @@ export class RAGMemoryService {
       const queryEmbedding = await aiService.generateEmbedding(query);
       
       // Find similar chunks with very low threshold to always get results
-      const allSimilarChunks = findSimilarEmbeddings(
+      const allSimilarChunks = retrievalService.searchSimilarChunks(
         queryEmbedding,
-        store.chunks.map(chunk => ({ embedding: chunk.embedding, content: chunk })),
+        store.chunks,
         Math.min(maxResults * 4, 20), // Get more candidates for better selection
         0.05 // Very low threshold to capture any potential connections
       );
       
       // If still no results, fall back to recent memory
       if (allSimilarChunks.length === 0) {
-        const fallbackChunks = store.chunks
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, Math.min(maxResults, store.chunks.length));
-        
-        const fallbackContent = fallbackChunks.map(chunk => chunk.content).join('\n\n---\n\n');
-        
-        if (useRAG && fallbackChunks.length > 0) {
-          try {
-            const systemPrompt = `You are an AI assistant with access to memory context. The user asked: "${query}"
+        return this.handleNoResults(query, store.chunks, maxResults, useRAG);
+      }
+      
+      // Categorize results by relevance
+      const { highlyRelevant, moderatelyRelevant, somewhatRelevant } = 
+        retrievalService.categorizeByRelevance(allSimilarChunks, minScore);
+      
+      // Select best chunks based on relevance tiers
+      const { selectedChunks, relevanceLevel } = this.selectBestChunks(
+        highlyRelevant,
+        moderatelyRelevant,
+        somewhatRelevant,
+        maxResults
+      );
+      
+      const relevantChunks = selectedChunks.map(result => result.content);
+      const contextContent = relevantChunks.map(chunk => chunk.content).join('\n\n---\n\n');
+      
+      // Generate RAG response if requested
+      if (useRAG && relevantChunks.length > 0) {
+        return this.generateRAGResponse(
+          query,
+          contextContent,
+          relevantChunks,
+          relevanceLevel,
+          selectedChunks[0]?.score || 0
+        );
+      }
+      
+      // Return context without RAG
+      return {
+        success: true,
+        content: `Found ${relevanceLevel} memory context (${relevantChunks.length} chunks, similarity: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):\n\n${contextContent}`,
+        size: contextContent.length,
+        relevantChunks
+      };
+    } catch (error) {
+      logError("RAGMemoryService.loadMemory", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error loading memory'
+      };
+    }
+  }
+
+  /**
+   * Get recent chunks sorted by timestamp
+   */
+  private getRecentChunks(chunks: MemoryChunk[], limit: number): MemoryChunk[] {
+    return chunks
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, Math.min(limit * 2, chunks.length));
+  }
+
+  /**
+   * Handle case when no similar chunks are found
+   */
+  private async handleNoResults(
+    query: string,
+    chunks: MemoryChunk[],
+    maxResults: number,
+    useRAG: boolean
+  ): Promise<MemoryResult> {
+    const fallbackChunks = this.getRecentChunks(chunks, maxResults);
+    const fallbackContent = fallbackChunks.map(chunk => chunk.content).join('\n\n---\n\n');
+    
+    if (useRAG && fallbackChunks.length > 0) {
+      try {
+        const systemPrompt = `You are an AI assistant with access to memory context. The user asked: "${query}"
 
 While no directly relevant memory was found, here is the most recent context available. Try to find any possible connections or provide helpful context based on what's available, even if indirect.
 
@@ -439,70 +253,70 @@ Available Memory Context:
 ${fallbackContent}
 
 User Query: ${query}`;
-            
-            const generatedResponse = await aiService.queryLLM(query, systemPrompt);
-            return {
-              success: true,
-              content: generatedResponse,
-              size: generatedResponse.length,
-              relevantChunks: fallbackChunks,
-              generatedResponse
-            };
-          } catch (error) {
-            logError("RAGMemoryService.loadMemory.fallback", error);
-          }
-        }
         
+        const generatedResponse = await aiService.queryLLM(query, systemPrompt);
         return {
           success: true,
-          content: `No directly relevant memory found for: "${query}". However, here is the most recent available context that might contain related information:\n\n${fallbackContent}`,
-          size: fallbackContent.length,
-          relevantChunks: fallbackChunks
+          content: generatedResponse,
+          size: generatedResponse.length,
+          relevantChunks: fallbackChunks,
+          generatedResponse
         };
+      } catch (error) {
+        logError("RAGMemoryService.loadMemory.fallback", error);
       }
-      
-      // Separate results into different relevance tiers
-      const scores = allSimilarChunks.map(chunk => chunk.score);
-      const maxScore = Math.max(...scores);
-      
-      // Define flexible relevance tiers
-      const highlyRelevant = allSimilarChunks.filter(chunk => chunk.score >= Math.max(minScore, maxScore * 0.7));
-      const moderatelyRelevant = allSimilarChunks.filter(chunk => 
-        chunk.score >= Math.max(0.15, maxScore * 0.4) && chunk.score < Math.max(minScore, maxScore * 0.7)
-      );
-      const somewhatRelevant = allSimilarChunks.filter(chunk => 
-        chunk.score >= 0.05 && chunk.score < Math.max(0.15, maxScore * 0.4)
-      );
-      
-      // Always provide results, starting with most relevant
-      let selectedChunks: Array<{ content: MemoryChunk; score: number }> = [];
-      let relevanceLevel = "highly relevant";
-      
-      if (highlyRelevant.length > 0) {
-        selectedChunks = this.applySemanticFirewall(highlyRelevant).slice(0, maxResults);
-        relevanceLevel = "highly relevant";
-      } else if (moderatelyRelevant.length > 0) {
-        selectedChunks = this.applySemanticFirewall(moderatelyRelevant).slice(0, maxResults);
-        relevanceLevel = "moderately relevant";
-      } else {
-        selectedChunks = this.applySemanticFirewall(somewhatRelevant).slice(0, maxResults);
-        relevanceLevel = "potentially related";
-      }
-      
-      const relevantChunks = selectedChunks.map(result => result.content);
-      const contextContent = relevantChunks.map(chunk => chunk.content).join('\n\n---\n\n');
-      
-      let response = contextContent;
-      let generatedResponse: string | undefined;
-      
-      // Use RAG to generate a response with relevance awareness
-      if (useRAG && relevantChunks.length > 0) {
-        try {
-          const systemPrompt = `You are an AI assistant with access to memory context from previous conversations and sessions. 
+    }
+    
+    return {
+      success: true,
+      content: `No directly relevant memory found for: "${query}". However, here is the most recent available context that might contain related information:\n\n${fallbackContent}`,
+      size: fallbackContent.length,
+      relevantChunks: fallbackChunks
+    };
+  }
+
+  /**
+   * Select best chunks from relevance tiers
+   */
+  private selectBestChunks(
+    highlyRelevant: Array<{ content: MemoryChunk; score: number }>,
+    moderatelyRelevant: Array<{ content: MemoryChunk; score: number }>,
+    somewhatRelevant: Array<{ content: MemoryChunk; score: number }>,
+    maxResults: number
+  ): { selectedChunks: Array<{ content: MemoryChunk; score: number }>; relevanceLevel: string } {
+    let selectedChunks: Array<{ content: MemoryChunk; score: number }> = [];
+    let relevanceLevel = "highly relevant";
+    
+    if (highlyRelevant.length > 0) {
+      selectedChunks = retrievalService.applySemanticFirewall(highlyRelevant).slice(0, maxResults);
+      relevanceLevel = "highly relevant";
+    } else if (moderatelyRelevant.length > 0) {
+      selectedChunks = retrievalService.applySemanticFirewall(moderatelyRelevant).slice(0, maxResults);
+      relevanceLevel = "moderately relevant";
+    } else {
+      selectedChunks = retrievalService.applySemanticFirewall(somewhatRelevant).slice(0, maxResults);
+      relevanceLevel = "potentially related";
+    }
+
+    return { selectedChunks, relevanceLevel };
+  }
+
+  /**
+   * Generate RAG response with context
+   */
+  private async generateRAGResponse(
+    query: string,
+    contextContent: string,
+    relevantChunks: MemoryChunk[],
+    relevanceLevel: string,
+    topScore: number
+  ): Promise<MemoryResult> {
+    try {
+      const systemPrompt = `You are an AI assistant with access to memory context from previous conversations and sessions. 
 
 The user asked: "${query}"
 
-The following memory context was found with ${relevanceLevel} similarity (similarity score: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):
+The following memory context was found with ${relevanceLevel} similarity (similarity score: ${topScore.toFixed(3)}):
 
 INSTRUCTIONS:
 1. If the context is highly relevant, answer directly from the memory
@@ -515,28 +329,27 @@ Memory Context:
 ${contextContent}
 
 User Query: ${query}`;
-          
-          generatedResponse = await aiService.queryLLM(query, systemPrompt);
-          response = generatedResponse;
-        } catch (error) {
-          logError("RAGMemoryService.loadMemory.generateResponse", error);
-          // Fall back to context content with relevance indication
-          response = `Found ${relevanceLevel} memory context (${relevantChunks.length} chunks, similarity: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):\n\n${contextContent}`;
-        }
-      }
+      
+      const generatedResponse = await aiService.queryLLM(query, systemPrompt);
       
       return {
         success: true,
-        content: response,
-        size: response.length,
+        content: generatedResponse,
+        size: generatedResponse.length,
         relevantChunks,
         generatedResponse
       };
     } catch (error) {
-      logError("RAGMemoryService.loadMemory", error);
+      logError("RAGMemoryService.loadMemory.generateResponse", error);
+      
+      // Fall back to context content with relevance indication
+      const fallbackResponse = `Found ${relevanceLevel} memory context (${relevantChunks.length} chunks, similarity: ${topScore.toFixed(3)}):\n\n${contextContent}`;
+      
       return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error loading memory'
+        success: true,
+        content: fallbackResponse,
+        size: fallbackResponse.length,
+        relevantChunks
       };
     }
   }
@@ -551,7 +364,7 @@ User Query: ${query}`;
     version: string;
   }> {
     try {
-      const store = await this.loadMemoryStore(workspaceRoot);
+      const store = await memoryStoreService.loadMemoryStore(workspaceRoot);
       const totalSize = store.chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
       
       return {
@@ -575,14 +388,14 @@ User Query: ${query}`;
    */
   async clearMemory(workspaceRoot: string): Promise<MemoryResult> {
     try {
-      const emptyStore: MemoryStore = {
+      const emptyStore = {
         chunks: [],
         version: "1.0.0",
         lastUpdated: new Date().toISOString(),
         totalChunks: 0
       };
       
-      await this.saveMemoryStore(workspaceRoot, emptyStore);
+      await memoryStoreService.saveMemoryStore(workspaceRoot, emptyStore);
       
       return {
         success: true,

@@ -154,11 +154,12 @@ private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95;
 
 ## ⚠️ Large Files (300+ lines)
 
-- [ ] `[P2]` `[L]` `src/services/rag-memory-service.ts` (601 lines)
+- [x] `[P2]` `[L]` `src/services/rag-memory-service.ts` (601 lines)
   - Problem: Mixes chunking, similarity search, deduplication, persistence, and RAG orchestration.
   - Evidence: Multiple private helpers and concerns in one class.
   - Fix: Extract to modules: `chunker`, `deduplicator`, `store` (I/O), `retrieval`, and a thin `rag-memory-service` facade.
   - Tests: Regression tests for each module; integration tests for end-to-end save/load.
+  - **Fix: Split into modular components - created `src/services/chunker.ts` (TextChunker for intelligent text splitting with boundary detection), `src/services/deduplicator.ts` (content hash and similarity-based deduplication), `src/services/memory-store.ts` (MemoryStoreService for persistence/I/O), `src/services/retrieval.ts` (RetrievalService for similarity search, semantic firewall, and relevance categorization); refactored `rag-memory-service.ts` to a thin 360-line facade that orchestrates these services**
 
 - [ ] `[P2]` `[L]` `src/shared/file-operations.ts` (446 lines)
   - Problem: Combines file I/O, directory traversal, move/rename, and an alternate memory API.
@@ -171,4 +172,4 @@ private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95;
 ## Summary
 
 Files analyzed: 16 | Total issues: 11 (S:6, M:3, L:2)
-Fixed: 8 issues | Remaining: 3 issues (2L large file splits)
+Fixed: 9 issues | Remaining: 1 issue (1L large file split)
