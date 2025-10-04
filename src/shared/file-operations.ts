@@ -257,9 +257,15 @@ export async function renameFile(
 }
 
 /**
- * Loads memory from .memory/memory.json file with optional query functionality
+ * @deprecated Use ragMemoryService.loadMemory() from src/services/rag-memory-service.ts instead.
+ * This function is kept for backward compatibility only.
+ * 
+ * Legacy memory loading function - loads plain JSON memory.
+ * New code should use the RAG-based memory service for semantic search and better retrieval.
  */
 export async function loadMemory(workspaceRoot: string, query?: string): Promise<MemoryResult> {
+  console.warn('loadMemory() is deprecated. Use ragMemoryService.loadMemory() for RAG-based memory with semantic search.');
+  
   try {
     const memoryDir = path.resolve(workspaceRoot, '.memory');
     const memoryPath = path.join(memoryDir, 'memory.json');
@@ -350,13 +356,19 @@ export async function loadMemory(workspaceRoot: string, query?: string): Promise
 }
 
 /**
- * Saves memory to .memory/memory.json file
+ * @deprecated Use ragMemoryService.saveMemory() from src/services/rag-memory-service.ts instead.
+ * This function is kept for backward compatibility only.
+ * 
+ * Legacy memory saving function - saves plain JSON memory.
+ * New code should use the RAG-based memory service for chunking, embeddings, and semantic search.
  */
 export async function saveMemory(
   workspaceRoot: string, 
   content: string, 
   append: boolean = false
 ): Promise<MemoryResult> {
+  console.warn('saveMemory() is deprecated. Use ragMemoryService.saveMemory() for RAG-based memory with embeddings.');
+  
   try {
     const memoryDir = path.resolve(workspaceRoot, '.memory');
     const memoryPath = path.join(memoryDir, 'memory.json');

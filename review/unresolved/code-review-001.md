@@ -1,7 +1,7 @@
 # Code Review - 001
 
 **Date**: 2025-10-04
-**Status**: 🟡 Partially Fixed
+**Status**: 🟢 Resolved (except large file splits)
 
 ---
 
@@ -47,7 +47,7 @@ if (!resolvedPath.startsWith(normalizedRoot + path.sep) && resolvedPath !== norm
 
 ## 🔧 Performance
 
-- [ ] `[P2]` `[S]` File reader returns unbounded content size - `src/tools/file-reader.ts:108-126`
+- [x] `[P2]` `[S]` File reader returns unbounded content size - `src/tools/file-reader.ts:108-126`
   - Problem: Returns full file contents for up to 50 files; very large files will bloat responses and slow tools.
   - Evidence:
 ```108:126:src/tools/file-reader.ts
@@ -69,8 +69,9 @@ for (let i = 0; i < relativePaths.length; i++) {
 ```
   - Fix: Enforce a max byte limit per file (e.g., 256 KB) and total response size (e.g., 1–2 MB). Truncate with a clear message and provide an option to stream or paginate.
   - Tests: Add tests for large files to assert truncation and for multi-file batches to cap total size.
+  - **Fix: Created `src/constants/file-reader-config.ts` with MAX_FILE_SIZE_BYTES (256KB) and MAX_RESPONSE_SIZE_BYTES (2MB) constants; implemented per-file truncation and total response size limiting with clear truncation messages in file-reader.ts**
 
-- [ ] `[P2]` `[M]` Full sort for top-K similarity - `src/services/ai-service.ts:231-236`
+- [x] `[P2]` `[M]` Full sort for top-K similarity - `src/services/ai-service.ts:231-236`
   - Problem: Sorting all candidates is O(n log n). For large memory stores, selecting top-K with a min-heap reduces overhead.
   - Evidence:
 ```231:236:src/services/ai-service.ts
@@ -81,18 +82,20 @@ return withScores
 ```
   - Fix: Use a bounded min-heap or partial selection (quickselect) to compute top-K without sorting all.
   - Tests: Micro-benchmarks on stores with 10k+ chunks; regression tests for ordering and filtering.
+  - **Fix: Implemented MinHeap class for efficient O(n log k) top-K selection instead of O(n log n) full sort; maintains bounded heap of size k during iteration, only sorting final k results**
 
 ---
 
 ## 📦 Code Quality
 
-- [ ] `[P2]` `[M]` Duplicate memory persistence logic - `src/shared/file-operations.ts:259-412` vs `src/services/rag-memory-service.ts:211-310,370-540`
+- [x] `[P2]` `[M]` Duplicate memory persistence logic - `src/shared/file-operations.ts:259-412` vs `src/services/rag-memory-service.ts:211-310,370-540`
   - Problem: Two different memory implementations (plain JSON vs chunked RAG store) can diverge and confuse maintainers.
   - Evidence: Separate `loadMemory/saveMemory` exist in shared utilities while tools use the RAG service.
   - Fix: Remove or deprecate the shared memory functions in `src/shared/file-operations.ts` and route all memory operations through `rag-memory-service`.
   - Tests: Update/align tests to cover a single memory API; verify backward compatibility or provide a migration.
+  - **Fix: Deprecated `loadMemory()` and `saveMemory()` functions in file-operations.ts with @deprecated JSDoc annotations and runtime warnings; added clear documentation to route new code to ragMemoryService; functions retained for backward compatibility**
 
-- [ ] `[P3]` `[S]` Weak typing for chat messages - `src/services/ai-service.ts:141-153`
+- [x] `[P3]` `[S]` Weak typing for chat messages - `src/services/ai-service.ts:141-153`
   - Problem: `messages` is inferred as `any[]`, reducing type safety.
   - Evidence:
 ```141:153:src/services/ai-service.ts
@@ -104,24 +107,27 @@ messages.push({ role: "user" as const, content: prompt });
 ```
   - Fix: Define a `ChatMessage` union type and type `messages: ChatMessage[]`.
   - Tests: Type-level tests or compile-time checks; ensure only valid roles are accepted.
+  - **Fix: Created `src/shared/chat-types.ts` with ChatMessage interface and role types; updated ai-service.ts to use `messages: ChatMessage[]` with proper typing**
 
-- [ ] `[P3]` `[S]` Unused response types - `src/shared/types.ts:12-26,30-33`
+- [x] `[P3]` `[S]` Unused response types - `src/shared/types.ts:12-26,30-33`
   - Problem: `SingleFileResponse`/`MultipleFilesResponse` are defined but not returned by tools.
   - Evidence: Tools return `ToolResponse` text instead of the structured types.
   - Fix: Either adopt these structured response types in tools or remove them to avoid confusion.
   - Tests: Update tool responses and add unit tests validating response shape.
+  - **Fix: Removed unused SingleFileResponse and MultipleFilesResponse interfaces from src/shared/types.ts**
 
 ---
 
 ## 🧹 Maintainability
 
-- [ ] `[P2]` `[S]` Verbose error logging may leak sensitive payloads - `src/services/ai-service.ts:92-94,182-184`; `src/services/rag-memory-service.ts:304,450,520,534`; `src/tools/save-memory.ts:87-95`
+- [x] `[P2]` `[S]` Verbose error logging may leak sensitive payloads - `src/services/ai-service.ts:92-94,182-184`; `src/services/rag-memory-service.ts:304,450,520,534`; `src/tools/save-memory.ts:87-95`
   - Problem: Logging upstream errors and generated content can leak sensitive information into logs.
   - Evidence: Multiple `console.error(...)` calls with raw error objects/messages.
   - Fix: Sanitize logs; log status codes and stable identifiers only. Gate verbose logs behind an env flag (e.g., `DEBUG`), and redact user content.
   - Tests: Unit tests to verify redaction; integration tests with `DEBUG=false` ensure minimal logging.
+  - **Fix: Created `src/utils/logger.ts` with sanitized logging functions (logError, logInfo, logWarning); replaced all console.error calls across ai-service, rag-memory-service, and all tools; logs are now gated behind DEBUG env variable and sensitive data is redacted**
 
-- [ ] `[P3]` `[S]` Magic numbers for chunking and thresholds - `src/services/rag-memory-service.ts:16-19`
+- [x] `[P3]` `[S]` Magic numbers for chunking and thresholds - `src/services/rag-memory-service.ts:16-19`
   - Problem: Hard-coded sizes and thresholds hinder tuning across deployments.
   - Evidence:
 ```16:19:src/services/rag-memory-service.ts
@@ -131,8 +137,9 @@ private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95;
 ```
   - Fix: Move to `src/constants/` and/or read from env with sane defaults; document trade-offs.
   - Tests: Config-driven tests validating behavior under different thresholds.
+  - **Fix: Created `src/constants/rag-config.ts` with configurable constants (CHUNK_SIZE, CHUNK_OVERLAP, SIMILARITY_DEDUP_THRESHOLD) supporting env variables with documented trade-offs; updated rag-memory-service to import from constants**
 
-- [ ] `[P3]` `[S]` Case-sensitive hardcoded ignore entry - `src/tools/check-structure.ts:66-67`
+- [x] `[P3]` `[S]` Case-sensitive hardcoded ignore entry - `src/tools/check-structure.ts:66-67`
   - Problem: Ignores `agents.md` by exact case; may be brittle across platforms.
   - Evidence:
 ```66:67:src/tools/check-structure.ts
@@ -141,6 +148,7 @@ private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95;
 ```
   - Fix: Normalize names to a common case before matching or use path-aware globbing.
   - Tests: Add cases with varying filename cases on Windows/Unix.
+  - **Fix: Updated shouldIgnore() function in check-structure.ts to normalize both filenames and patterns to lowercase before comparison, ensuring case-insensitive matching across all platforms**
 
 ---
 
@@ -163,3 +171,4 @@ private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95;
 ## Summary
 
 Files analyzed: 16 | Total issues: 11 (S:6, M:3, L:2)
+Fixed: 8 issues | Remaining: 3 issues (2L large file splits)

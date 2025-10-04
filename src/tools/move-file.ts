@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateAndNormalizePath, validateWorkspaceRoot } from "../shared/validation.js";
 import { moveFile } from "../shared/file-operations.js";
+import { logError } from "../utils/logger.js";
 
 /**
  * Schema for the move_file tool parameters
@@ -76,7 +77,7 @@ export function registerMoveFileTool(server: McpServer): void {
         }
         
       } catch (error) {
-        console.error("Move file error:", error);
+        logError("MoveFile.move_file", error);
         return {
           content: [{ 
             type: "text", 

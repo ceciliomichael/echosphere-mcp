@@ -9,13 +9,15 @@ import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { aiService, findSimilarEmbeddings, cosineSimilarity } from "./ai-service.js";
 import type { MemoryChunk, MemoryStore, MemoryResult, SimilarityResult } from "../shared/types.js";
+import { CHUNK_SIZE, CHUNK_OVERLAP, SIMILARITY_DEDUP_THRESHOLD } from "../constants/rag-config.js";
+import { logError, logInfo } from "../utils/logger.js";
 
 export class RAGMemoryService {
   private readonly MEMORY_DIR = ".memory";
   private readonly MEMORY_FILE = "memory.json";
-  private readonly CHUNK_SIZE = 800; // Maximum characters per chunk (more conservative for better embedding quality)
-  private readonly CHUNK_OVERLAP = 120; // Overlap between chunks (15% of chunk size)
-  private readonly SIMILARITY_DEDUP_THRESHOLD = 0.95; // Threshold for near-duplicate detection
+  private readonly CHUNK_SIZE = CHUNK_SIZE;
+  private readonly CHUNK_OVERLAP = CHUNK_OVERLAP;
+  private readonly SIMILARITY_DEDUP_THRESHOLD = SIMILARITY_DEDUP_THRESHOLD;
 
   /**
    * Generate content hash for deduplication
@@ -239,7 +241,7 @@ export class RAGMemoryService {
       }
       
       // Generate embeddings for all chunks
-      console.error(`Generating embeddings for ${textChunks.length} chunks...`);
+      logInfo("RAGMemoryService.saveMemory", `Generating embeddings for ${textChunks.length} chunks`);
       const embeddings = await aiService.generateEmbeddings(textChunks);
       
       // Get current embedding model info
@@ -301,7 +303,7 @@ export class RAGMemoryService {
         content: resultMessage
       };
     } catch (error) {
-      console.error("Error saving memory:", error);
+      logError("RAGMemoryService.saveMemory", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error saving memory'
@@ -402,7 +404,7 @@ export class RAGMemoryService {
       }
       
       // Generate embedding for query
-      console.error(`Searching memory with query: "${query}"`);
+      logInfo("RAGMemoryService.loadMemory", "Searching memory with semantic query");
       const queryEmbedding = await aiService.generateEmbedding(query);
       
       // Find similar chunks with very low threshold to always get results
@@ -447,7 +449,7 @@ User Query: ${query}`;
               generatedResponse
             };
           } catch (error) {
-            console.error("Error generating fallback RAG response:", error);
+            logError("RAGMemoryService.loadMemory.fallback", error);
           }
         }
         
@@ -517,7 +519,7 @@ User Query: ${query}`;
           generatedResponse = await aiService.queryLLM(query, systemPrompt);
           response = generatedResponse;
         } catch (error) {
-          console.error("Error generating RAG response:", error);
+          logError("RAGMemoryService.loadMemory.generateResponse", error);
           // Fall back to context content with relevance indication
           response = `Found ${relevanceLevel} memory context (${relevantChunks.length} chunks, similarity: ${selectedChunks[0]?.score.toFixed(3) || 'N/A'}):\n\n${contextContent}`;
         }
@@ -531,7 +533,7 @@ User Query: ${query}`;
         generatedResponse
       };
     } catch (error) {
-      console.error("Error loading memory:", error);
+      logError("RAGMemoryService.loadMemory", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error loading memory'

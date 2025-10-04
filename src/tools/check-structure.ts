@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateWorkspaceRoot } from "../shared/validation.js";
 import path from "path";
 import { promises as fs } from "fs";
+import { logError } from "../utils/logger.js";
 
 /**
  * Schema for the check_structure tool parameters
@@ -86,13 +87,18 @@ export function registerCheckStructureTool(server: McpServer): void {
 
         // Function to check if a name should be ignored
         function shouldIgnore(name: string): boolean {
+          // Normalize to lowercase for case-insensitive comparison
+          const normalizedName = name.toLowerCase();
+          
           return allIgnorePatterns.some(pattern => {
+            const normalizedPattern = pattern.toLowerCase();
+            
             // Simple pattern matching - exact match or wildcard
-            if (pattern.includes('*')) {
-              const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-              return regex.test(name);
+            if (normalizedPattern.includes('*')) {
+              const regex = new RegExp('^' + normalizedPattern.replace(/\*/g, '.*') + '$');
+              return regex.test(normalizedName);
             }
-            return name === pattern;
+            return normalizedName === normalizedPattern;
           });
         }
 
@@ -166,7 +172,7 @@ export function registerCheckStructureTool(server: McpServer): void {
         };
 
       } catch (error) {
-        console.error("Check structure error:", error);
+        logError("CheckStructure.check_structure", error);
         return {
           content: [{
             type: "text",

@@ -7,6 +7,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateAndNormalizePath, getPathType, validateWorkspaceRoot } from "../shared/validation.js";
 import { readSingleFile } from "../shared/file-operations.js";
+import { MAX_FILE_SIZE_BYTES, MAX_RESPONSE_SIZE_BYTES, TRUNCATION_MESSAGE } from "../constants/file-reader-config.js";
+import { logError } from "../utils/logger.js";
 /**
  * Schema for the read_files tool parameters
  */
@@ -41,12 +43,26 @@ async function handleSinglePath(workspace_root: string, relative_path: string): 
     
     // Read single file
     const fileResult = await readSingleFile(resolvedPath);
+    
+    // Check if file exceeds max size and truncate if necessary
+    let content = fileResult.content;
+    let truncated = false;
+    if (fileResult.size > MAX_FILE_SIZE_BYTES) {
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      const encoded = encoder.encode(fileResult.content);
+      const maxBytes = MAX_FILE_SIZE_BYTES - encoder.encode(TRUNCATION_MESSAGE).length;
+      content = decoder.decode(encoded.slice(0, maxBytes)) + TRUNCATION_MESSAGE;
+      truncated = true;
+    }
+    
     // Use the original relative_path to preserve the user's path format
     files.push({
       path: relative_path,
-      content: fileResult.content,
+      content,
       size: fileResult.size,
-      type: 'file'
+      type: 'file',
+      truncated
     });
   } catch (error) {
     errors.push(`Error reading file "${relative_path}": ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -108,21 +124,55 @@ export function registerFileReaderTool(server: McpServer): void {
         // Create a more descriptive summary
         let responseText = `Read ${totalCount} file(s): ${successCount} successful, ${errorCount} failed\n\n`;
         
-        // Add file contents
+        let totalResponseSize = 0;
+        const encoder = new TextEncoder();
+        
+        // Add file contents with size limits
         for (let i = 0; i < relativePaths.length; i++) {
           const relativePath = relativePaths[i];
-          responseText += `${relativePath}:\n`;
+          const header = `${relativePath}:\n`;
+          responseText += header;
+          totalResponseSize += encoder.encode(header).length;
           
           // Find the file with this exact path
           const file = allFiles.find(f => f.path === relativePath);
           const errorResult = allErrors.find(e => e.includes(relativePath));
           
           if (file) {
-            responseText += `${file.content}\n\n`;
+            const contentWithNewlines = `${file.content}\n\n`;
+            const contentSize = encoder.encode(contentWithNewlines).length;
+            
+            // Check if adding this content would exceed max response size
+            if (totalResponseSize + contentSize > MAX_RESPONSE_SIZE_BYTES) {
+              const remainingBytes = MAX_RESPONSE_SIZE_BYTES - totalResponseSize - encoder.encode(TRUNCATION_MESSAGE).length - 10;
+              if (remainingBytes > 0) {
+                const encoded = encoder.encode(file.content);
+                const decoder = new TextDecoder();
+                const truncatedContent = decoder.decode(encoded.slice(0, remainingBytes));
+                responseText += `${truncatedContent}${TRUNCATION_MESSAGE}\n\n`;
+              } else {
+                responseText += `[Content omitted - response size limit reached]\n\n`;
+              }
+              break; // Stop adding more files
+            }
+            
+            responseText += contentWithNewlines;
+            totalResponseSize += contentSize;
+            
+            // Add truncation notice if file was truncated
+            if (file.truncated) {
+              const notice = `[Note: File was truncated at ${MAX_FILE_SIZE_BYTES} bytes]\n\n`;
+              responseText += notice;
+              totalResponseSize += encoder.encode(notice).length;
+            }
           } else if (errorResult) {
-            responseText += `Error: ${errorResult}\n\n`;
+            const errorText = `Error: ${errorResult}\n\n`;
+            responseText += errorText;
+            totalResponseSize += encoder.encode(errorText).length;
           } else {
-            responseText += `Error: File not found or could not be read\n\n`;
+            const errorText = `Error: File not found or could not be read\n\n`;
+            responseText += errorText;
+            totalResponseSize += encoder.encode(errorText).length;
           }
         }
         
@@ -135,7 +185,7 @@ export function registerFileReaderTool(server: McpServer): void {
         };
         
       } catch (error) {
-        console.error("File reading error:", error);
+        logError("FileReader.read_files", error);
         return {
           content: [{ 
             type: "text", 

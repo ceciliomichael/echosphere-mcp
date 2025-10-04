@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateWorkspaceRoot } from "../shared/validation.js";
 import { ragMemoryService } from "../services/rag-memory-service.js";
+import { logError } from "../utils/logger.js";
 
 /**
  * Clean markdown formatting from text
@@ -88,7 +89,7 @@ export function registerLoadMemoryTool(server: McpServer): void {
         }
         
       } catch (error) {
-        console.error("Load memory error:", error);
+        logError("LoadMemory.load_memory", error);
         return {
           content: [{ 
             type: "text", 

@@ -6,6 +6,8 @@
 import { config } from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { ChatMessage } from "../shared/chat-types.js";
+import { logError } from "../utils/logger.js";
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -89,7 +91,7 @@ export class AIService {
 
       return data.data[0].embedding;
     } catch (error) {
-      console.error("Error generating embedding:", error);
+      logError("AIService.generateEmbedding", error, { status: error instanceof Error && 'status' in error ? (error as any).status : undefined });
       throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -128,7 +130,7 @@ export class AIService {
         .sort((a, b) => a.index - b.index)
         .map(item => item.embedding);
     } catch (error) {
-      console.error("Error generating embeddings:", error);
+      logError("AIService.generateEmbeddings", error, { batchSize: texts.length });
       throw new Error(`Failed to generate embeddings: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -138,17 +140,17 @@ export class AIService {
    */
   async queryLLM(prompt: string, systemPrompt?: string): Promise<string> {
     try {
-      const messages = [];
+      const messages: ChatMessage[] = [];
       
       if (systemPrompt) {
         messages.push({
-          role: "system" as const,
+          role: "system",
           content: systemPrompt
         });
       }
       
       messages.push({
-        role: "user" as const,
+        role: "user",
         content: prompt
       });
 
@@ -179,7 +181,7 @@ export class AIService {
 
       return data.choices[0].message.content;
     } catch (error) {
-      console.error("Error querying LLM:", error);
+      logError("AIService.queryLLM", error);
       throw new Error(`Failed to query LLM: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -214,7 +216,61 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Find the most similar embeddings to a query embedding
+ * Min-heap for efficient top-K selection
+ */
+class MinHeap<T> {
+  private heap: T[] = [];
+  private compareFn: (a: T, b: T) => number;
+
+  constructor(compareFn: (a: T, b: T) => number) {
+    this.compareFn = compareFn;
+  }
+
+  push(item: T, maxSize: number): void {
+    if (this.heap.length < maxSize) {
+      this.heap.push(item);
+      this.bubbleUp(this.heap.length - 1);
+    } else if (this.compareFn(item, this.heap[0]) > 0) {
+      this.heap[0] = item;
+      this.bubbleDown(0);
+    }
+  }
+
+  private bubbleUp(index: number): void {
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (this.compareFn(this.heap[index], this.heap[parentIndex]) >= 0) break;
+      [this.heap[index], this.heap[parentIndex]] = [this.heap[parentIndex], this.heap[index]];
+      index = parentIndex;
+    }
+  }
+
+  private bubbleDown(index: number): void {
+    while (true) {
+      let minIndex = index;
+      const leftChild = 2 * index + 1;
+      const rightChild = 2 * index + 2;
+
+      if (leftChild < this.heap.length && this.compareFn(this.heap[leftChild], this.heap[minIndex]) < 0) {
+        minIndex = leftChild;
+      }
+      if (rightChild < this.heap.length && this.compareFn(this.heap[rightChild], this.heap[minIndex]) < 0) {
+        minIndex = rightChild;
+      }
+      if (minIndex === index) break;
+
+      [this.heap[index], this.heap[minIndex]] = [this.heap[minIndex], this.heap[index]];
+      index = minIndex;
+    }
+  }
+
+  toSortedArray(): T[] {
+    return this.heap.sort((a, b) => this.compareFn(b, a));
+  }
+}
+
+/**
+ * Find the most similar embeddings to a query embedding using efficient top-K selection
  */
 export function findSimilarEmbeddings(
   queryEmbedding: number[],
@@ -222,17 +278,21 @@ export function findSimilarEmbeddings(
   topK: number = 5,
   threshold: number = 0.1
 ): Array<{ embedding: number[]; content: any; score: number }> {
-  // Calculate similarities
-  const withScores = embeddings.map(item => ({
-    ...item,
-    score: cosineSimilarity(queryEmbedding, item.embedding)
-  }));
+  // Use min-heap for efficient top-K selection (O(n log k) instead of O(n log n))
+  const heap = new MinHeap<{ embedding: number[]; content: any; score: number }>(
+    (a, b) => a.score - b.score
+  );
 
-  // Filter by threshold and sort by similarity
-  return withScores
-    .filter(item => item.score >= threshold)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
+  // Process each embedding and maintain top-K in heap
+  for (const item of embeddings) {
+    const score = cosineSimilarity(queryEmbedding, item.embedding);
+    if (score >= threshold) {
+      heap.push({ ...item, score }, topK);
+    }
+  }
+
+  // Return sorted results (highest score first)
+  return heap.toSortedArray();
 }
 
 // Export singleton instance

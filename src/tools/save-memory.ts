@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateWorkspaceRoot } from "../shared/validation.js";
 import { ragMemoryService } from "../services/rag-memory-service.js";
+import { logError, logWarning } from "../utils/logger.js";
 
 /**
  * Schema for the save_memory tool parameters
@@ -46,7 +47,7 @@ export function registerSaveMemoryTool(server: McpServer): void {
         
         // Provide guidance for short content
         if (content.trim().length < 100) {
-          console.error(`Warning: Short memory content (${content.trim().length} chars). Consider adding more detail for better context retrieval.`);
+          logWarning("SaveMemory", `Short content (${content.trim().length} chars) - consider more detail`);
         }
         
         // Save memory using RAG system
@@ -84,7 +85,7 @@ export function registerSaveMemoryTool(server: McpServer): void {
         }
         
       } catch (error) {
-        console.error("Save memory error:", error);
+        logError("SaveMemory.save_memory", error);
         return {
           content: [{ 
             type: "text", 

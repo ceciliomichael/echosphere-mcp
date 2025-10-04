@@ -8,6 +8,7 @@ import path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { validateAndNormalizePath, validateWorkspaceRoot } from "../shared/validation.js";
 import { renameFile } from "../shared/file-operations.js";
+import { logError } from "../utils/logger.js";
 
 /**
  * Schema for the rename_file tool parameters
@@ -87,7 +88,7 @@ export function registerRenameFileTool(server: McpServer): void {
         }
         
       } catch (error) {
-        console.error("Rename file error:", error);
+        logError("RenameFile.rename_file", error);
         return {
           content: [{ 
             type: "text", 

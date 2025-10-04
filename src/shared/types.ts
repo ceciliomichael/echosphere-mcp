@@ -9,22 +9,6 @@ export interface FileResult {
   error?: string;
 }
 
-export interface SingleFileResponse {
-  type: 'single_file';
-  file: {
-    path: string;
-    size: number;
-    content: string;
-  };
-}
-
-export interface MultipleFilesResponse {
-  type: 'multiple_files';
-  files: FileResult[];
-  directory: string;
-  totalFiles: number;
-}
-
 export type PathType = 'file' | 'directory' | 'not_found';
 
 export interface ToolResponse {
