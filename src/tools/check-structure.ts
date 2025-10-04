@@ -61,10 +61,7 @@ export function registerCheckStructureTool(server: McpServer): void {
           '.DS_Store', 'Thumbs.db', 'desktop.ini',
 
           // Development tools
-          '.taskmaster',
-
-          // Project specific files
-          'agents.md'
+          '.taskmaster'
         ];
 
         // Read .checkignore file if it exists

@@ -8,6 +8,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { ChatMessage } from "../shared/chat-types.js";
 import { logError } from "../utils/logger.js";
+import { cosineSimilarity } from "../utils/vector-math.js";
+import { MinHeap } from "../utils/min-heap.js";
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -51,13 +53,14 @@ export class AIService {
 
   constructor() {
     this.baseUrl = process.env.AI_BASE_URL || "https://ai.echosphere.cfd/v1";
-    this.apiKey = process.env.AI_API_KEY || "";
     this.model = process.env.AI_MODEL || "mistral-small-latest";
     this.embeddingModel = process.env.AI_EMBEDDING_MODEL || "mistral-embed";
 
-    if (!this.apiKey) {
-      throw new Error("AI_API_KEY is required in environment variables");
+    const apiKey = process.env.AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("AI_API_KEY is required in environment variables. Please set AI_API_KEY in your .env file.");
     }
+    this.apiKey = apiKey;
   }
 
   /**
@@ -184,88 +187,6 @@ export class AIService {
       logError("AIService.queryLLM", error);
       throw new Error(`Failed to query LLM: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }
-}
-
-/**
- * Calculate cosine similarity between two vectors
- */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new Error("Vectors must have the same length");
-  }
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  normA = Math.sqrt(normA);
-  normB = Math.sqrt(normB);
-
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-
-  return dotProduct / (normA * normB);
-}
-
-/**
- * Min-heap for efficient top-K selection
- */
-class MinHeap<T> {
-  private heap: T[] = [];
-  private compareFn: (a: T, b: T) => number;
-
-  constructor(compareFn: (a: T, b: T) => number) {
-    this.compareFn = compareFn;
-  }
-
-  push(item: T, maxSize: number): void {
-    if (this.heap.length < maxSize) {
-      this.heap.push(item);
-      this.bubbleUp(this.heap.length - 1);
-    } else if (this.compareFn(item, this.heap[0]) > 0) {
-      this.heap[0] = item;
-      this.bubbleDown(0);
-    }
-  }
-
-  private bubbleUp(index: number): void {
-    while (index > 0) {
-      const parentIndex = Math.floor((index - 1) / 2);
-      if (this.compareFn(this.heap[index], this.heap[parentIndex]) >= 0) break;
-      [this.heap[index], this.heap[parentIndex]] = [this.heap[parentIndex], this.heap[index]];
-      index = parentIndex;
-    }
-  }
-
-  private bubbleDown(index: number): void {
-    while (true) {
-      let minIndex = index;
-      const leftChild = 2 * index + 1;
-      const rightChild = 2 * index + 2;
-
-      if (leftChild < this.heap.length && this.compareFn(this.heap[leftChild], this.heap[minIndex]) < 0) {
-        minIndex = leftChild;
-      }
-      if (rightChild < this.heap.length && this.compareFn(this.heap[rightChild], this.heap[minIndex]) < 0) {
-        minIndex = rightChild;
-      }
-      if (minIndex === index) break;
-
-      [this.heap[index], this.heap[minIndex]] = [this.heap[minIndex], this.heap[index]];
-      index = minIndex;
-    }
-  }
-
-  toSortedArray(): T[] {
-    return this.heap.sort((a, b) => this.compareFn(b, a));
   }
 }
 

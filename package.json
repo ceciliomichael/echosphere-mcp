@@ -16,7 +16,7 @@
     "ai-tools",
     "file-reader"
   ],
-  "author": "",
+  "author": "Echosphere",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.2",

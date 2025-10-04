@@ -4,7 +4,7 @@
  */
 
 import { createHash } from "crypto";
-import { cosineSimilarity } from "./ai-service.js";
+import { cosineSimilarity } from "../utils/vector-math.js";
 import type { MemoryChunk } from "../shared/types.js";
 import { SIMILARITY_DEDUP_THRESHOLD } from "../constants/rag-config.js";
 

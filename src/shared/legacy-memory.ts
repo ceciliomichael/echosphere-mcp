@@ -9,6 +9,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { MemoryResult } from "./types.js";
+import { logWarning } from "../utils/logger.js";
 
 /**
  * @deprecated Use ragMemoryService.loadMemory() from src/services/rag-memory-service.ts instead.
@@ -18,7 +19,7 @@ import type { MemoryResult } from "./types.js";
  * New code should use the RAG-based memory service for semantic search and better retrieval.
  */
 export async function loadMemory(workspaceRoot: string, query?: string): Promise<MemoryResult> {
-  console.warn('loadMemory() is deprecated. Use ragMemoryService.loadMemory() for RAG-based memory with semantic search.');
+  logWarning('legacy-memory.loadMemory', 'loadMemory() is deprecated. Use ragMemoryService.loadMemory() for RAG-based memory with semantic search.');
   
   try {
     const memoryDir = path.resolve(workspaceRoot, '.memory');
@@ -121,7 +122,7 @@ export async function saveMemory(
   content: string, 
   append: boolean = false
 ): Promise<MemoryResult> {
-  console.warn('saveMemory() is deprecated. Use ragMemoryService.saveMemory() for RAG-based memory with embeddings.');
+  logWarning('legacy-memory.saveMemory', 'saveMemory() is deprecated. Use ragMemoryService.saveMemory() for RAG-based memory with embeddings.');
   
   try {
     const memoryDir = path.resolve(workspaceRoot, '.memory');

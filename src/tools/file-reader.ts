@@ -89,7 +89,7 @@ export function registerFileReaderTool(server: McpServer): void {
           return {
             content: [{
               type: "text",
-              text: "No file paths provided to read.\n\nUsage: {\"workspaceRoot\": \"C:/project\", \"relativePaths\": [\"src/file1.js\", \"README.md\"]}\n\nNote: Only individual files are supported, not directories."
+              text: "No file paths provided to read.\n\nUsage Example:\n{\n  \"workspaceRoot\": \"C:/project\",\n  \"relativePaths\": [\"src/file1.js\", \"README.md\"]\n}\n\nImportant:\n- Provide at least one file path in the relativePaths array\n- Paths should be relative to workspaceRoot\n- Only individual files are supported, not directories\n- Maximum 50 files per batch for optimal performance\n\nFor more information, see the tool documentation."
             }],
             isError: true
           };

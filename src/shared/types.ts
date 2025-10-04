@@ -60,8 +60,3 @@ export interface MemoryStore {
   lastUpdated: string;
   totalChunks: number;
 }
-
-export interface SimilarityResult {
-  chunk: MemoryChunk;
-  score: number;
-}
